@@ -1,0 +1,86 @@
+{
+  "master": {
+    "terminal_path": "C:\\Users\\username\\Desktop\\MTCopier\\MT5_Master\\terminal64.exe",
+    "login": ,
+    "password": "@",
+    "server": ""
+  },
+  "slaves": [
+    {
+      "id": "slave_1",
+      "enabled": true,
+      "terminal_path": "C:\\Users\\username\\Desktop\\MTCopier\\MT5_Slave\\terminal64.exe",
+      "login":,
+      "password": "",
+      "server": "",
+      "copy_settings": {
+        "lot_mode": "multiplier",
+        "lot_multiplier": 1.0,
+        "poll_interval_ms": 50,
+        "max_open_trades": 10,
+        "max_lot_size": 5.0,
+        "drawdown_stop_percent": 20,
+        "allowed_symbols": [
+          "GOLD",
+          "SILVER"
+        ]
+      },
+      "symbol_mapping": {
+        "GOLD": "XAUUSD.s",
+        "SILVER": "XAGUSD.s"
+      }
+    },
+    {
+      "id": "slave_2",
+      "enabled": false,
+      "terminal_path": "C:\\Users\\username\\Desktop\\MTCopier\\MT5_Slave_2\\terminal64.exe",
+      "login": ,
+      "password": "",
+      "server": "",
+      "copy_settings": {
+        "lot_mode": "multiplier",
+        "lot_multiplier": 0.0,
+        "poll_interval_ms": 10000,
+        "max_open_trades": 10,
+        "max_lot_size": 5.0,
+        "drawdown_stop_percent": 20,
+        "allowed_symbols": [
+          "GOLD",
+          "SILVER"
+        ]
+      },
+      "symbol_mapping": {
+        "GOLD": "XAUUSD",
+        "SILVER": "XAGUSD"
+      }
+    },
+    {
+      "id": "slave_3",
+      "enabled": false,
+      "terminal_path": "C:\\Users\\username\\Desktop\\MTCopier\\MT5_Slave_Mum\\terminal64.exe",
+      "login": ,
+      "password": "",
+      "server": "",
+      "copy_settings": {
+        "lot_mode": "multiplier",
+        "lot_multiplier": 1.0,
+        "poll_interval_ms": 50,
+        "max_open_trades": 10,
+        "max_lot_size": 5.0,
+        "drawdown_stop_percent": 20,
+        "allowed_symbols": [
+          "GOLD",
+          "SILVER"
+        ]
+      },
+      "symbol_mapping": {
+        "GOLD": "GOLD",
+        "SILVER": "SILVER"
+      }
+    }
+  ],
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 6535
+  }
+}

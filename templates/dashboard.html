@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MT5 Trade Copier</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+    <div class="top-bar-left">
+        <h1>MT5 Trade Copier</h1>
+        <button class="btn btn-sm" onclick="openSettings()">Settings</button>
+    </div>
+    <div class="status-items">
+        <div class="status-item">
+            <span class="status-dot" id="master-dot"></span>
+            <span class="status-label">Master:</span>
+            <span class="status-value" id="master-status">--</span>
+        </div>
+        <div class="status-item" id="slaves-status-area"></div>
+        <div class="status-item">
+            <span class="status-dot" id="engine-dot"></span>
+            <span class="status-label">Engine:</span>
+            <span class="status-value" id="engine-status">--</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Uptime:</span>
+            <span class="status-value" id="uptime">--</span>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="controls">
+        <button class="btn btn-primary" id="btn-pause-resume" onclick="togglePauseResume()">Pause</button>
+        <button class="btn btn-danger" onclick="showCloseAllModal()">Close All Positions</button>
+        <button class="btn" onclick="reconnect('master')">Reconnect Master</button>
+    </div>
+
+    <div class="cards-grid" id="account-cards"></div>
+
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Today's Trades</div><div class="stat-value" id="stat-today-trades">0</div></div>
+        <div class="stat-card"><div class="stat-label">Wins / Losses</div><div class="stat-value" id="stat-wins-losses">0 / 0</div></div>
+        <div class="stat-card"><div class="stat-label">Today's P&L</div><div class="stat-value" id="stat-today-pnl">$0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Win Rate (Today)</div><div class="stat-value" id="stat-win-rate">0%</div></div>
+        <div class="stat-card"><div class="stat-label">Win Rate (All-Time)</div><div class="stat-value" id="stat-alltime-wr">0%</div></div>
+        <div class="stat-card"><div class="stat-label">Avg Copy Delay</div><div class="stat-value" id="stat-delay">0ms</div></div>
+        <div class="stat-card"><div class="stat-label">Largest Win</div><div class="stat-value positive" id="stat-largest-win">$0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Largest Loss</div><div class="stat-value negative" id="stat-largest-loss">$0.00</div></div>
+    </div>
+
+    <div class="table-section">
+        <h3>Open Positions</h3>
+        <div class="table-wrapper">
+            <table>
+                <thead><tr>
+                    <th>#</th><th>Symbol</th><th>Direction</th><th>Slave</th>
+                    <th>Master Ticket</th><th>Slave Ticket</th><th>Master Lots</th><th>Slave Lots</th>
+                    <th>Open Price</th><th>Current Price</th><th>P&L (Master)</th><th>SL</th><th>TP</th><th>Status</th>
+                </tr></thead>
+                <tbody id="positions-body">
+                    <tr><td colspan="14" class="empty-state">No open positions</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="log-section">
+        <h3>Activity Log</h3>
+        <div class="log-entries" id="log-entries"><div class="empty-state">No activity yet</div></div>
+    </div>
+</div>
+
+<!-- Close All Modal -->
+<div class="modal-overlay" id="close-all-modal">
+    <div class="modal">
+        <h3 style="color:var(--red)">Close All Positions</h3>
+        <p>This will immediately close ALL open positions on ALL slave accounts.</p>
+        <div class="modal-actions">
+            <button class="btn" onclick="hideCloseAllModal()">Cancel</button>
+            <button class="btn btn-danger" onclick="closeAll()">Confirm Close All</button>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Overlay -->
+<div class="settings-overlay" id="settings-overlay" onclick="closeSettings()"></div>
+
+<!-- Settings Panel -->
+<div class="settings-panel" id="settings-panel">
+    <div class="settings-header">
+        <h2>Settings</h2>
+        <button class="settings-close" onclick="closeSettings()">&times;</button>
+    </div>
+    <div class="settings-body">
+
+        <!-- Master Account -->
+        <div class="settings-section">
+            <h3>Master Account</h3>
+            <div class="form-group"><label>Terminal Path</label><input type="text" id="cfg-master-path"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Login</label><input type="number" id="cfg-master-login"></div>
+                <div class="form-group"><label>Server</label><input type="text" id="cfg-master-server"></div>
+            </div>
+            <div class="form-group"><label>Password</label><input type="password" id="cfg-master-password"></div>
+            <div class="form-actions"><button class="btn btn-primary btn-sm" onclick="saveMaster()">Save Master</button></div>
+        </div>
+
+        <!-- Slave Accounts -->
+        <div class="settings-section">
+            <h3>Slave Accounts</h3>
+            <div id="slaves-list"></div>
+            <button class="btn btn-primary btn-sm" onclick="showAddSlaveForm()" style="margin-top:8px" id="btn-add-slave">+ Add Slave</button>
+            <div id="add-slave-form" style="display:none;margin-top:14px;"></div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+let copierStatus = 'running';
+let cachedConfig = null;
+
+function fmtMoney(v){ if(v==null)return'--'; return(v>=0?'+':'')+('$'+v.toFixed(2)); }
+function fmtPrice(v){ if(v==null||v===0)return'--'; return v.toFixed(5); }
+function pnlClass(v){ if(v==null)return''; return v>=0?'positive':'negative'; }
+function fmtUptime(s){ return`${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ${s%60}s`; }
+function fmtTimestamp(ts){ return new Date(ts*1000).toLocaleString('en-GB',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
+function statusBadge(st){ const c={'synced':'badge-synced','pending':'badge-pending','Pending':'badge-pending','error':'badge-error','closing':'badge-closing'}[st]||'badge-pending'; return`<span class="badge ${c}">${st}</span>`; }
+function dirBadge(d){ return`<span class="badge ${d==='BUY'?'badge-buy':'badge-sell'}">${d}</span>`; }
+function showToast(msg,type='success'){ const t=document.getElementById('toast'); t.textContent=msg; t.className=`toast show ${type}`; setTimeout(()=>t.className='toast',3000); }
+
+// --- Fetch ---
+async function fetchStatus(){
+    try{
+        const data=await(await fetch('/api/status')).json();
+        copierStatus=data.status;
+        const eDot=document.getElementById('engine-dot'),eSt=document.getElementById('engine-status');
+        if(data.status==='running'){eDot.className='status-dot green';eSt.textContent='Running';}
+        else if(data.status.startsWith('paused')){eDot.className='status-dot orange';eSt.textContent='Paused';}
+        else{eDot.className='status-dot red';eSt.textContent=data.status;}
+        const btn=document.getElementById('btn-pause-resume');
+        if(data.status==='running'){btn.textContent='Pause';btn.className='btn btn-warning';}
+        else{btn.textContent='Resume';btn.className='btn btn-primary';}
+        document.getElementById('uptime').textContent=fmtUptime(data.uptime_seconds);
+        updateAccountDot('master',data.master);
+        let sd='';
+        for(const[sid,sdata]of Object.entries(data.slaves||{})){
+            const info=sdata.account;const con=info&&info.connected;
+            sd+=`<div class="status-item"><span class="status-dot ${con?'green':'red'}"></span><span class="status-label">${sid}:</span><span class="status-value">${con?'#'+info.login+' @ '+info.server:'Disconnected'}</span></div>`;
+        }
+        document.getElementById('slaves-status-area').innerHTML=sd;
+        buildAccountCards(data.master,data.slaves);
+    }catch(e){console.error('fetchStatus:',e);}
+}
+function updateAccountDot(type,info){
+    const dot=document.getElementById(`${type}-dot`),st=document.getElementById(`${type}-status`);
+    if(!info){dot.className='status-dot red';st.textContent='Disconnected';return;}
+    if(info.connected){dot.className='status-dot green';st.textContent=`#${info.login} @ ${info.server}`;}
+    else{dot.className='status-dot red';st.textContent='Disconnected';}
+}
+function buildAccountCards(master,slaves){
+    const c=document.getElementById('account-cards');
+    let h=buildCard('Master Account','master',master,'');
+    for(const[sid,sdata]of Object.entries(slaves||{})){
+        h+=buildCard(sid,sid,sdata.account,
+            `<button class="btn btn-sm btn-danger" onclick="closeAllSlave('${sid}')" style="margin-left:auto">Close All</button>
+             <button class="btn btn-sm" onclick="reconnect('${sid}')">Reconnect</button>`);
+    }
+    c.innerHTML=h;
+}
+function buildCard(title,id,info,extra){
+    const b=info?'$'+(info.balance||0).toFixed(2):'--';
+    const e=info?'$'+(info.equity||0).toFixed(2):'--';
+    const p=info?fmtMoney(info.profit):'--'; const pc=info?pnlClass(info.profit):'';
+    const m=info?'$'+(info.margin_used||0).toFixed(2)+' / $'+(info.margin_free||0).toFixed(2):'--';
+    const pos=info?(info.open_positions||0):'--';
+    const d=info?fmtMoney(info.daily_pnl):'--'; const dc=info?pnlClass(info.daily_pnl):'';
+    return`<div class="card"><h3>${title} ${extra}</h3><div class="account-stats">
+        <div class="stat-item"><span class="stat-label">Balance</span><span class="stat-value">${b}</span></div>
+        <div class="stat-item"><span class="stat-label">Equity</span><span class="stat-value">${e}</span></div>
+        <div class="stat-item"><span class="stat-label">Floating P&L</span><span class="stat-value ${pc}">${p}</span></div>
+        <div class="stat-item"><span class="stat-label">Margin / Free</span><span class="stat-value">${m}</span></div>
+        <div class="stat-item"><span class="stat-label">Open Positions</span><span class="stat-value">${pos}</span></div>
+        <div class="stat-item"><span class="stat-label">Daily P&L</span><span class="stat-value ${dc}">${d}</span></div>
+    </div></div>`;
+}
+async function fetchPositions(){
+    try{
+        const data=await(await fetch('/api/positions')).json();
+        const body=document.getElementById('positions-body');
+        if(!data.length){body.innerHTML='<tr><td colspan="14" class="empty-state">No open positions</td></tr>';return;}
+        body.innerHTML=data.map((p,i)=>{
+            const rc=p.master_pnl>0?'profit-row':(p.master_pnl<0?'loss-row':'');
+            return`<tr class="${rc}"><td>${i+1}</td><td><strong>${p.symbol}</strong></td><td>${dirBadge(p.direction)}</td><td>${p.slave_id}</td><td>${p.master_ticket}</td><td>${p.slave_ticket||'--'}</td><td>${p.master_lots}</td><td>${p.slave_lots||'--'}</td><td>${fmtPrice(p.open_price)}</td><td>${fmtPrice(p.current_price)}</td><td class="${pnlClass(p.master_pnl)}">${fmtMoney(p.master_pnl)}</td><td>${fmtPrice(p.sl)}</td><td>${fmtPrice(p.tp)}</td><td>${statusBadge(p.copy_status)}</td></tr>`;
+        }).join('');
+    }catch(e){console.error('fetchPositions:',e);}
+}
+async function fetchLog(){
+    try{
+        const data=await(await fetch('/api/log?limit=100')).json();
+        const c=document.getElementById('log-entries');
+        if(!data.length){c.innerHTML='<div class="empty-state">No activity yet</div>';return;}
+        c.innerHTML=data.map(e=>{
+            const cls={'OPENED':'log-opened','CLOSED':'log-closed','MODIFIED':'log-modified','ERROR':'log-error','INFO':'log-info'}[e.action]||'log-info';
+            return`<div class="log-entry ${cls}"><span class="log-time">[${fmtTimestamp(e.timestamp)}]</span><span>${e.message}</span></div>`;
+        }).join('');
+    }catch(e){console.error('fetchLog:',e);}
+}
+async function fetchStats(){
+    try{
+        const s=await(await fetch('/api/stats')).json();
+        document.getElementById('stat-today-trades').textContent=s.today_trades;
+        document.getElementById('stat-wins-losses').textContent=`${s.today_wins} / ${s.today_losses}`;
+        const p=document.getElementById('stat-today-pnl');p.textContent=fmtMoney(s.today_pnl);p.className='stat-value '+pnlClass(s.today_pnl);
+        document.getElementById('stat-win-rate').textContent=s.today_win_rate+'%';
+        document.getElementById('stat-alltime-wr').textContent=s.all_time_win_rate+'%';
+        document.getElementById('stat-delay').textContent=s.avg_copy_delay_ms+'ms';
+        document.getElementById('stat-largest-win').textContent=fmtMoney(s.largest_win);
+        document.getElementById('stat-largest-loss').textContent=fmtMoney(s.largest_loss);
+    }catch(e){console.error('fetchStats:',e);}
+}
+
+// --- Controls ---
+async function togglePauseResume(){await fetch(copierStatus==='running'?'/api/pause':'/api/resume',{method:'POST'});fetchStatus();}
+function showCloseAllModal(){document.getElementById('close-all-modal').classList.add('active');}
+function hideCloseAllModal(){document.getElementById('close-all-modal').classList.remove('active');}
+async function closeAll(){hideCloseAllModal();await fetch('/api/close_all',{method:'POST'});fetchStatus();fetchLog();}
+async function closeAllSlave(sid){if(!confirm(`Close all positions on ${sid}?`))return;await fetch(`/api/close_all?slave_id=${sid}`,{method:'POST'});fetchStatus();fetchLog();}
+async function reconnect(t){await fetch(`/api/reconnect/${t}`,{method:'POST'});showToast(`Reconnect requested for ${t}`);}
+
+// --- Settings ---
+function openSettings(){document.getElementById('settings-overlay').classList.add('active');document.getElementById('settings-panel').classList.add('active');loadConfig();}
+function closeSettings(){document.getElementById('settings-overlay').classList.remove('active');document.getElementById('settings-panel').classList.remove('active');}
+
+async function loadConfig(){
+    cachedConfig=await(await fetch('/api/config/full')).json();
+    const c=cachedConfig;
+    document.getElementById('cfg-master-path').value=c.master.terminal_path||'';
+    document.getElementById('cfg-master-login').value=c.master.login||'';
+    document.getElementById('cfg-master-server').value=c.master.server||'';
+    document.getElementById('cfg-master-password').value=c.master.password||'';
+    renderSlaves(c.slaves||[]);
+}
+
+function renderSlaves(slaves){
+    const el=document.getElementById('slaves-list');
+    if(!slaves.length){el.innerHTML='<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No slave accounts</div>';return;}
+    el.innerHTML=slaves.map(s=>{
+        const cs=s.copy_settings||{};
+        const sm=s.symbol_mapping||{};
+        const smStr=Object.entries(sm).map(([k,v])=>`${k} -> ${v}`).join(', ')||'none';
+        const symsStr=(cs.allowed_symbols||[]).join(', ')||'all';
+        return`<div class="slave-card">
+            <div class="slave-card-header">
+                <strong>${s.id} ${s.enabled?'<span class="badge badge-synced">enabled</span>':'<span class="badge badge-error">disabled</span>'}</strong>
+                <div class="slave-card-actions">
+                    <button class="btn btn-sm" onclick="editSlave('${s.id}')">Edit</button>
+                    <button class="btn btn-sm btn-danger" onclick="removeSlave('${s.id}')">Remove</button>
+                </div>
+            </div>
+            <div class="slave-card-info">
+                Login: ${s.login} | Server: ${s.server}<br>
+                Lot: ${cs.lot_mode||'multiplier'} x${cs.lot_multiplier??1} | Max: ${cs.max_lot_size??5} | DD: ${cs.drawdown_stop_percent??20}%<br>
+                Symbols: ${symsStr} | Mapping: ${smStr}
+            </div>
+            <div id="edit-slave-${s.id}" style="display:none;margin-top:10px;"></div>
+        </div>`;
+    }).join('');
+}
+
+function editSlave(sid){
+    const el=document.getElementById(`edit-slave-${sid}`);
+    if(el.style.display!=='none'){el.style.display='none';return;}
+    const s=cachedConfig.slaves.find(x=>x.id===sid); if(!s)return;
+    const cs=s.copy_settings||{};
+    const sm=s.symbol_mapping||{};
+    const smRows=Object.entries(sm).map(([k,v])=>`<div class="mapping-row"><input type="text" value="${k}" class="map-from-${sid}"><span class="mapping-arrow">&rarr;</span><input type="text" value="${v}" class="map-to-${sid}"><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">X</button></div>`).join('');
+
+    el.style.display='block';
+    el.innerHTML=`
+        <div style="border-top:1px solid var(--border);padding-top:12px;">
+        <strong style="display:block;margin-bottom:8px;color:var(--text-secondary)">CONNECTION</strong>
+        <div class="form-group"><label>Terminal Path</label><input type="text" id="e-${sid}-path" value="${s.terminal_path||''}"></div>
+        <div class="form-row">
+            <div class="form-group"><label>Login</label><input type="number" id="e-${sid}-login" value="${s.login||''}"></div>
+            <div class="form-group"><label>Server</label><input type="text" id="e-${sid}-server" value="${s.server||''}"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Password</label><input type="password" id="e-${sid}-pw" value="${s.password||''}"></div>
+            <div class="form-group"><label>Enabled</label><select id="e-${sid}-en"><option value="true" ${s.enabled!==false?'selected':''}>Yes</option><option value="false" ${s.enabled===false?'selected':''}>No</option></select></div>
+        </div>
+
+        <strong style="display:block;margin:14px 0 8px;color:var(--text-secondary)">COPY SETTINGS</strong>
+        <div class="form-row">
+            <div class="form-group"><label>Lot Mode</label><select id="e-${sid}-lotmode"><option value="mirror" ${cs.lot_mode==='mirror'?'selected':''}>Mirror (1:1)</option><option value="multiplier" ${cs.lot_mode==='multiplier'?'selected':''}>Multiplier</option><option value="proportional" ${cs.lot_mode==='proportional'?'selected':''}>Proportional</option></select></div>
+            <div class="form-group"><label>Lot Multiplier</label><input type="number" step="0.1" id="e-${sid}-lotmult" value="${cs.lot_multiplier??1}"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Poll Interval (ms)</label><input type="number" id="e-${sid}-poll" value="${cs.poll_interval_ms??500}"></div>
+            <div class="form-group"><label>Max Open Trades</label><input type="number" id="e-${sid}-maxt" value="${cs.max_open_trades??10}"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Max Lot Size</label><input type="number" step="0.01" id="e-${sid}-maxlot" value="${cs.max_lot_size??5}"></div>
+            <div class="form-group"><label>Drawdown Stop (%)</label><input type="number" id="e-${sid}-dd" value="${cs.drawdown_stop_percent??20}"></div>
+        </div>
+        <div class="form-group"><label>Allowed Symbols (comma-separated, empty=all)</label><input type="text" id="e-${sid}-syms" value="${(cs.allowed_symbols||[]).join(', ')}"></div>
+
+        <strong style="display:block;margin:14px 0 8px;color:var(--text-secondary)">SYMBOL MAPPING</strong>
+        <div id="map-rows-${sid}">${smRows||'<div style="color:var(--text-muted);font-size:13px">No mappings</div>'}</div>
+        <button class="btn btn-sm" onclick="addMapRow('${sid}')" style="margin-top:4px">+ Add Mapping</button>
+
+        <div class="form-actions" style="margin-top:14px">
+            <button class="btn btn-primary btn-sm" onclick="saveSlave('${sid}')">Save</button>
+            <button class="btn btn-sm" onclick="document.getElementById('edit-slave-${sid}').style.display='none'">Cancel</button>
+        </div>
+        </div>`;
+}
+
+function addMapRow(sid){
+    const c=document.getElementById(`map-rows-${sid}`);
+    if(c.querySelector('div[style]'))c.innerHTML='';
+    c.insertAdjacentHTML('beforeend',`<div class="mapping-row"><input type="text" placeholder="Master Symbol" class="map-from-${sid}"><span class="mapping-arrow">&rarr;</span><input type="text" placeholder="Slave Symbol" class="map-to-${sid}"><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">X</button></div>`);
+}
+
+async function saveSlave(sid){
+    const symsVal=document.getElementById(`e-${sid}-syms`).value;
+    // Build symbol mapping from rows
+    const mapping={};
+    document.querySelectorAll(`.map-from-${sid}`).forEach((el,i)=>{
+        const from=el.value.trim();
+        const toEls=document.querySelectorAll(`.map-to-${sid}`);
+        const to=toEls[i]?.value.trim();
+        if(from&&to)mapping[from]=to;
+    });
+    const data={
+        enabled:document.getElementById(`e-${sid}-en`).value==='true',
+        terminal_path:document.getElementById(`e-${sid}-path`).value,
+        login:parseInt(document.getElementById(`e-${sid}-login`).value),
+        password:document.getElementById(`e-${sid}-pw`).value,
+        server:document.getElementById(`e-${sid}-server`).value,
+        copy_settings:{
+            lot_mode:document.getElementById(`e-${sid}-lotmode`).value,
+            lot_multiplier:parseFloat(document.getElementById(`e-${sid}-lotmult`).value),
+            poll_interval_ms:parseInt(document.getElementById(`e-${sid}-poll`).value),
+            max_open_trades:parseInt(document.getElementById(`e-${sid}-maxt`).value),
+            max_lot_size:parseFloat(document.getElementById(`e-${sid}-maxlot`).value),
+            drawdown_stop_percent:parseInt(document.getElementById(`e-${sid}-dd`).value),
+            allowed_symbols:symsVal?symsVal.split(',').map(s=>s.trim()).filter(Boolean):[],
+        },
+        symbol_mapping:mapping,
+    };
+    const res=await fetch(`/api/config/slaves/${sid}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    if(res.ok){showToast(`${sid} saved`);loadConfig();}
+    else{const e=await res.json();showToast(e.error||'Error','error');}
+}
+
+async function removeSlave(sid){
+    if(!confirm(`Remove "${sid}"? This clears its trade mappings.`))return;
+    const res=await fetch(`/api/config/slaves/${sid}`,{method:'DELETE'});
+    if(res.ok){showToast(`${sid} removed`);loadConfig();fetchStatus();}
+    else{const e=await res.json();showToast(e.error||'Error','error');}
+}
+
+function showAddSlaveForm(){
+    document.getElementById('add-slave-form').style.display='block';
+    document.getElementById('add-slave-form').innerHTML=`
+    <div class="slave-card">
+        <strong style="display:block;margin-bottom:10px">New Slave Account</strong>
+        <div class="form-group"><label>Slave ID (unique, e.g. slave_3)</label><input type="text" id="new-sid" placeholder="slave_3"></div>
+        <div class="form-group"><label>Terminal Path</label><input type="text" id="new-spath" placeholder="C:\\path\\to\\terminal64.exe"></div>
+        <div class="form-row">
+            <div class="form-group"><label>Login</label><input type="number" id="new-slogin"></div>
+            <div class="form-group"><label>Server</label><input type="text" id="new-sserver"></div>
+        </div>
+        <div class="form-group"><label>Password</label><input type="password" id="new-spw"></div>
+
+        <strong style="display:block;margin:12px 0 8px;color:var(--text-secondary)">COPY SETTINGS</strong>
+        <div class="form-row">
+            <div class="form-group"><label>Lot Mode</label><select id="new-slotmode"><option value="mirror">Mirror</option><option value="multiplier" selected>Multiplier</option><option value="proportional">Proportional</option></select></div>
+            <div class="form-group"><label>Lot Multiplier</label><input type="number" step="0.1" id="new-slotmult" value="1.0"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Poll Interval (ms)</label><input type="number" id="new-spoll" value="100"></div>
+            <div class="form-group"><label>Max Open Trades</label><input type="number" id="new-smaxt" value="10"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Max Lot Size</label><input type="number" step="0.01" id="new-smaxlot" value="5.0"></div>
+            <div class="form-group"><label>Drawdown Stop (%)</label><input type="number" id="new-sdd" value="20"></div>
+        </div>
+        <div class="form-group"><label>Allowed Symbols (comma-separated)</label><input type="text" id="new-ssyms" placeholder="GOLD, EURUSD"></div>
+
+        <strong style="display:block;margin:12px 0 8px;color:var(--text-secondary)">SYMBOL MAPPING</strong>
+        <div id="new-map-rows"></div>
+        <button class="btn btn-sm" onclick="addNewMapRow()" style="margin-top:4px">+ Add Mapping</button>
+
+        <div class="form-actions" style="margin-top:14px">
+            <button class="btn btn-primary btn-sm" onclick="addSlave()">Add Slave</button>
+            <button class="btn btn-sm" onclick="document.getElementById('add-slave-form').style.display='none'">Cancel</button>
+        </div>
+    </div>`;
+}
+
+function addNewMapRow(){
+    const c=document.getElementById('new-map-rows');
+    c.insertAdjacentHTML('beforeend',`<div class="mapping-row"><input type="text" placeholder="Master Symbol" class="new-map-from"><span class="mapping-arrow">&rarr;</span><input type="text" placeholder="Slave Symbol" class="new-map-to"><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">X</button></div>`);
+}
+
+async function addSlave(){
+    const symsVal=document.getElementById('new-ssyms').value;
+    const mapping={};
+    document.querySelectorAll('.new-map-from').forEach((el,i)=>{
+        const from=el.value.trim();
+        const to=document.querySelectorAll('.new-map-to')[i]?.value.trim();
+        if(from&&to)mapping[from]=to;
+    });
+    const data={
+        id:document.getElementById('new-sid').value.trim(),
+        enabled:true,
+        terminal_path:document.getElementById('new-spath').value,
+        login:parseInt(document.getElementById('new-slogin').value),
+        password:document.getElementById('new-spw').value,
+        server:document.getElementById('new-sserver').value,
+        copy_settings:{
+            lot_mode:document.getElementById('new-slotmode').value,
+            lot_multiplier:parseFloat(document.getElementById('new-slotmult').value),
+            poll_interval_ms:parseInt(document.getElementById('new-spoll').value),
+            max_open_trades:parseInt(document.getElementById('new-smaxt').value),
+            max_lot_size:parseFloat(document.getElementById('new-smaxlot').value),
+            drawdown_stop_percent:parseInt(document.getElementById('new-sdd').value),
+            allowed_symbols:symsVal?symsVal.split(',').map(s=>s.trim()).filter(Boolean):[],
+        },
+        symbol_mapping:mapping,
+    };
+    if(!data.id){showToast('Slave ID is required','error');return;}
+    const res=await fetch('/api/config/slaves',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    if(res.ok){showToast(`${data.id} added`);document.getElementById('add-slave-form').style.display='none';loadConfig();fetchStatus();}
+    else{const e=await res.json();showToast(e.error||'Error','error');}
+}
+
+async function saveMaster(){
+    const data={
+        terminal_path:document.getElementById('cfg-master-path').value,
+        login:parseInt(document.getElementById('cfg-master-login').value),
+        password:document.getElementById('cfg-master-password').value,
+        server:document.getElementById('cfg-master-server').value,
+    };
+    const res=await fetch('/api/config/master',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    if(res.ok)showToast('Master config saved');else showToast('Failed to save','error');
+}
+
+// --- Auto-refresh ---
+function refreshAll(){fetchStatus();fetchPositions();fetchLog();fetchStats();}
+refreshAll();
+setInterval(refreshAll,2500);
+</script>
+</body>
+</html>
